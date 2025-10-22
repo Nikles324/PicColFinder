@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Поиск изображений по цвету (Локальная версия)</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React Libraries -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <!-- Babel Standalone for in-browser JSX/ES6 transpilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-gray-900 text-white font-sans">
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        // --- From types.ts ---
+        const AppStatusEnum = {
+          Idle: 'idle',
+          Processing: 'processing',
+          Done: 'done',
+        };
+
+        // --- From components/Spinner.tsx ---
+        const Spinner = () => {
+          return (
+            <svg
+              className="animate-spin h-5 w-5 text-white"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              ></circle>
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              ></path>
+            </svg>
+          );
+        };
+
+        // --- From components/ImageCard.tsx ---
+        const ImageCard = ({ image }) => {
+            const { useState, useRef, useEffect } = React;
+            const [isMenuOpen, setIsMenuOpen] = useState(false);
+            const [copyStatus, setCopyStatus] = useState('idle');
+            const cardRef = useRef(null);
+
+            const handleToggleMenu = () => {
+                setIsMenuOpen(!isMenuOpen);
+            };
+
+            const handleDownload = (e) => {
+                e.stopPropagation(); 
+                const link = document.createElement('a');
+                link.href = image.url;
+                link.download = image.file.name;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setIsMenuOpen(false);
+            };
+
+            const handleCopy = (e) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(image.file.name).then(() => {
+                setCopyStatus('copied');
+                setTimeout(() => {
+                    setCopyStatus('idle');
+                    setIsMenuOpen(false); 
+                }, 1500);
+                });
+            };
+
+            useEffect(() => {
+                const handleClickOutside = (event) => {
+                if (cardRef.current && !cardRef.current.contains(event.target)) {
+                    setIsMenuOpen(false);
+                }
+                };
+                if (isMenuOpen) {
+                document.addEventListener('mousedown', handleClickOutside);
+                } else {
+                document.removeEventListener('mousedown', handleClickOutside);
+                }
+                
+                return () => {
+                document.removeEventListener('mousedown', handleClickOutside);
+                };
+            }, [isMenuOpen]);
+
+            return (
+                <div
+                ref={cardRef}
+                className="group relative overflow-hidden rounded-lg shadow-lg bg-gray-800 transition-transform duration-300 hover:scale-105 cursor-pointer"
+                onClick={handleToggleMenu}
+                aria-haspopup="true"
+                aria-expanded={isMenuOpen}
+                >
+                <img
+                    src={image.url}
+                    alt={image.file.name}
+                    className="w-full h-48 object-cover"
+                    loading="lazy"
+                />
+                <div className="absolute bottom-0 left-0 w-full bg-black bg-opacity-60 p-2 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity duration-300 truncate">
+                    {image.file.name}
+                </div>
+
+                {isMenuOpen && (
+                    <div 
+                    className="absolute inset-0 bg-black bg-opacity-80 flex flex-col items-center justify-center z-10 p-2 gap-3"
+                    onClick={(e) => e.stopPropagation()} 
+                    >
+                    <button
+                        onClick={handleDownload}
+                        className="w-full text-center bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700 transition duration-200 text-sm"
+                    >
+                        Скачать
+                    </button>
+                    <button
+                        onClick={handleCopy}
+                        className="w-full text-center bg-gray-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-gray-700 transition duration-200 text-sm disabled:opacity-75"
+                        disabled={copyStatus === 'copied'}
+                    >
+                        {copyStatus === 'copied' ? 'Скопировано!' : 'Копировать имя файла'}
+                    </button>
+                    </div>
+                )}
+                </div>
+            );
+        };
+
+        // --- From components/ResultsGrid.tsx ---
+        const ResultsGrid = ({ results }) => {
+            if (results.length === 0) {
+                return (
+                <div className="flex items-center justify-center h-full text-gray-500">
+                    <p>Подходящих изображений не найдено.</p>
+                </div>
+                );
+            }
+
+            return (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-4">
+                {results.map((image) => (
+                    <ImageCard key={image.id} image={image} />
+                ))}
+                </div>
+            );
+        };
+
+        // --- From components/ControlPanel.tsx ---
+        const ControlPanel = ({
+            colorStart,
+            setColorStart,
+            colorEnd,
+            setColorEnd,
+            pixelThreshold,
+            setPixelThreshold,
+            onFilesSelect,
+            onSearch,
+            status,
+            fileCount,
+        }) => {
+            const { useState, useEffect } = React;
+            const [hexColorStart, setHexColorStart] = useState(colorStart);
+            const [hexColorEnd, setHexColorEnd] = useState(colorEnd);
+
+            useEffect(() => {
+                setHexColorStart(colorStart);
+            }, [colorStart]);
+
+            useEffect(() => {
+                setHexColorEnd(colorEnd);
+            }, [colorEnd]);
+
+            const handleFileChange = (e) => {
+                onFilesSelect(e.target.files);
+            };
+            
+            const isProcessing = status === AppStatusEnum.Processing;
+
+            const handleHexChange = (e, setter) => {
+                setter(e.target.value);
+            };
+            
+            const handleHexBlur = (hexValue, originalColor, setColor, setHex) => {
+                const hex = hexValue.startsWith('#') ? hexValue : `#${hexValue}`;
+                if (/^#[0-9a-f]{6}$/i.test(hex) || /^#[0-9a-f]{3}$/i.test(hex)) {
+                    if (hex.length === 4) {
+                        const fullHex = `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`;
+                        setColor(fullHex.toUpperCase());
+                    } else {
+                        setColor(hex.toUpperCase());
+                    }
+                } else {
+                setHex(originalColor); 
+                }
+            };
+
+            const handleHexKeyDown = (e) => {
+                if (e.key === 'Enter') {
+                    const target = e.target;
+                    target.blur();
+                }
+            };
+
+            return (
+                <div className="w-full md:w-80 lg:w-96 bg-gray-800 p-6 rounded-lg shadow-2xl flex flex-col gap-6">
+                <h2 className="text-2xl font-bold text-center text-indigo-400">Поиск по цвету</h2>
+                
+                <div>
+                    <label htmlFor="file-upload" className="block text-sm font-medium text-gray-300 mb-2">
+                    1. Выберите папку с изображениями
+                    </label>
+                    <div className="mt-1">
+                    <input
+                        id="file-upload"
+                        name="file-upload"
+                        type="file"
+                        className="hidden"
+                        webkitdirectory=""
+                        directory=""
+                        multiple
+                        onChange={handleFileChange}
+                        disabled={isProcessing}
+                    />
+                    <label
+                        htmlFor="file-upload"
+                        className={`cursor-pointer rounded-md font-medium text-indigo-400 hover:text-indigo-300 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-offset-gray-800 focus-within:ring-indigo-500 bg-gray-700 px-4 py-2 text-sm w-full flex justify-center ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                        <span>{fileCount > 0 ? `Выбрано файлов: ${fileCount}` : 'Выбрать папку'}</span>
+                    </label>
+                    </div>
+                </div>
+
+                <div>
+                    <label htmlFor="color-picker-start" className="block text-sm font-medium text-gray-300 mb-2">
+                    2. Начальный цвет диапазона
+                    </label>
+                    <div className="flex items-center gap-2">
+                    <input
+                        id="color-picker-start"
+                        type="color"
+                        value={colorStart}
+                        onChange={(e) => setColorStart(e.target.value)}
+                        className="w-12 h-10 p-1 bg-gray-700 border border-gray-600 rounded-md cursor-pointer disabled:opacity-50"
+                        disabled={isProcessing}
+                    />
+                    <input
+                        type="text"
+                        value={hexColorStart}
+                        onChange={(e) => handleHexChange(e, setHexColorStart)}
+                        onBlur={() => handleHexBlur(hexColorStart, colorStart, setColorStart, setHexColorStart)}
+                        onKeyDown={handleHexKeyDown}
+                        className="w-full bg-gray-700 border border-gray-600 text-white rounded-md p-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50"
+                        disabled={isProcessing}
+                        aria-label="HEX-код начального цвета"
+                    />
+                    </div>
+                </div>
+
+                <div>
+                    <label htmlFor="color-picker-end" className="block text-sm font-medium text-gray-300 mb-2">
+                    3. Конечный цвет диапазона
+                    </label>
+                    <div className="flex items-center gap-2">
+                    <input
+                        id="color-picker-end"
+                        type="color"
+                        value={colorEnd}
+                        onChange={(e) => setColorEnd(e.target.value)}
+                        className="w-12 h-10 p-1 bg-gray-700 border border-gray-600 rounded-md cursor-pointer disabled:opacity-50"
+                        disabled={isProcessing}
+                    />
+                    <input
+                        type="text"
+                        value={hexColorEnd}
+                        onChange={(e) => handleHexChange(e, setHexColorEnd)}
+                        onBlur={() => handleHexBlur(hexColorEnd, colorEnd, setColorEnd, setHexColorEnd)}
+                        onKeyDown={handleHexKeyDown}
+                        className="w-full bg-gray-700 border border-gray-600 text-white rounded-md p-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50"
+                        disabled={isProcessing}
+                        aria-label="HEX-код конечного цвета"
+                    />
+                    </div>
+                </div>
+                
+                <div>
+                    <label htmlFor="pixel-threshold" className="block text-sm font-medium text-gray-300 mb-2">
+                    4. Минимальный порог пикселей
+                    </label>
+                    <input
+                    id="pixel-threshold"
+                    type="number"
+                    min="1"
+                    value={pixelThreshold}
+                    onChange={(e) => setPixelThreshold(Number(e.target.value))}
+                    className="w-full bg-gray-700 border border-gray-600 text-white rounded-md p-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    disabled={isProcessing}
+                    />
+                </div>
+
+                <button
+                    onClick={onSearch}
+                    disabled={isProcessing || fileCount === 0}
+                    className="w-full flex items-center justify-center bg-indigo-600 text-white font-bold py-3 px-4 rounded-md hover:bg-indigo-700 transition duration-300 disabled:bg-gray-500 disabled:cursor-not-allowed"
+                >
+                    {isProcessing ? <Spinner /> : 'Начать поиск'}
+                </button>
+
+                <div className="text-center text-xs text-gray-500 pt-4 border-t border-gray-700">
+                    <p>Обработка изображений происходит на вашем устройстве.</p>
+                    <p className="mt-1">Обработка ускоряется браузером, использующим всю мощь вашего оборудования, включая Apple Silicon (M1/M2/M3) и другие ГП.</p>
+                </div>
+                </div>
+            );
+        };
+
+        // --- NEW: LogPanel Component ---
+        const LogPanel = ({ logs, onCopy, onClear }) => {
+            const logContainerRef = React.useRef(null);
+            
+            React.useEffect(() => {
+                if (logContainerRef.current) {
+                    logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+                }
+            }, [logs]);
+
+            const getLogColor = (type) => {
+                switch (type) {
+                    case 'error': return 'text-red-400';
+                    case 'success': return 'text-green-400';
+                    case 'system': return 'text-blue-400';
+                    default: return 'text-gray-400';
+                }
+            };
+
+            return (
+                <div className="bg-gray-900 border-t border-gray-700 p-4">
+                    <div className="flex justify-between items-center mb-2">
+                        <h3 className="text-lg font-semibold">Журнал событий</h3>
+                        <div>
+                            <button onClick={onCopy} className="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-md mr-2">Копировать лог</button>
+                            <button onClick={onClear} className="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-md">Очистить</button>
+                        </div>
+                    </div>
+                    <div ref={logContainerRef} className="h-40 bg-black bg-opacity-25 rounded-md p-2 font-mono text-xs overflow-y-auto">
+                        {logs.map((log, index) => (
+                            <div key={index} className={`whitespace-pre-wrap ${getLogColor(log.type)}`}>
+                                <span className="text-gray-500 mr-2">[{log.timestamp}]</span>
+                                <span>{log.message}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- From App.tsx (Modified for logging) ---
+        const App = () => {
+            const { useState, useRef, useCallback, useEffect } = React;
+            
+            const [logs, setLogs] = useState([]);
+            
+            const addLog = useCallback((message, type = 'info') => {
+                const timestamp = new Date().toLocaleTimeString('ru-RU');
+                setLogs(prev => [...prev, { timestamp, message, type }]);
+            }, []);
+
+            const workerCode = `
+            self.onmessage = (e) => {
+              try {
+                const { imageData, searchParams, imageFile } = e.data;
+                const { startColor, endColor, pixelThreshold } = searchParams;
+
+                const pixels = imageData.data;
+                let matchCount = 0;
+
+                const r_min = Math.min(startColor.r, endColor.r);
+                const r_max = Math.max(startColor.r, endColor.r);
+                const g_min = Math.min(startColor.g, endColor.g);
+                const g_max = Math.max(startColor.g, endColor.g);
+                const b_min = Math.min(startColor.b, endColor.b);
+                const b_max = Math.max(startColor.b, endColor.b);
+
+                for (let i = 0; i < pixels.length; i += 4) {
+                    const pR = pixels[i];
+                    const pG = pixels[i + 1];
+                    const pB = pixels[i + 2];
+                    
+                    if (pR >= r_min && pR <= r_max &&
+                        pG >= g_min && pG <= g_max &&
+                        pB >= b_min && pB <= b_max) {
+                    matchCount++;
+                    }
+                    
+                    if (matchCount >= pixelThreshold) {
+                    self.postMessage({ status: 'match', imageFile });
+                    return;
+                    }
+                }
+                self.postMessage({ status: 'no_match', imageFile });
+              } catch (error) {
+                self.postMessage({ status: 'error', imageFile: e.data.imageFile, error: error.message });
+              }
+            };
+            `;
+
+            const hexToRgb = (hex) => {
+                const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                return result
+                    ? {
+                        r: parseInt(result[1], 16),
+                        g: parseInt(result[2], 16),
+                        b: parseInt(result[3], 16),
+                    }
+                    : null;
+            };
+
+            const MAX_WORKERS = navigator.hardwareConcurrency || 4;
+
+            const [colorStart, setColorStart] = useState('#4A00E0');
+            const [colorEnd, setColorEnd] = useState('#8E2DE2');
+            const [pixelThreshold, setPixelThreshold] = useState(100);
+            const [files, setFiles] = useState([]);
+            const [results, setResults] = useState([]);
+            const [status, setStatus] = useState(AppStatusEnum.Idle);
+            const [progress, setProgress] = useState({ processed: 0, total: 0 });
+
+            const workerPool = useRef([]);
+            const fileQueue = useRef([]);
+            const processedCount = useRef(0);
+            
+            useEffect(() => {
+                addLog('Приложение инициализировано.', 'system');
+                try {
+                  const blob = new Blob([workerCode], { type: 'application/javascript' });
+                  const workerUrl = URL.createObjectURL(blob);
+                  workerPool.current = Array.from({ length: MAX_WORKERS }, () => new Worker(workerUrl));
+                  addLog(`Создан пул из ${MAX_WORKERS} воркеров.`, 'success');
+                  
+                  window.onerror = (message, source, lineno, colno, error) => {
+                    addLog(`Критическая ошибка: ${message} в ${source}:${lineno}`, 'error');
+                    return true; // Prevents the browser's default error handling
+                  };
+
+                  return () => {
+                      workerPool.current.forEach(worker => worker.terminate());
+                      URL.revokeObjectURL(workerUrl);
+                      window.onerror = null;
+                  };
+                } catch(e) {
+                   addLog(`Не удалось создать воркеры: ${e.message}`, 'error');
+                }
+            }, [addLog]);
+
+            const handleFilesSelect = (selectedFiles) => {
+                if (!selectedFiles) return;
+                addLog(`Начата обработка ${selectedFiles.length} выбранных элементов.`);
+                const imageFiles = Array.from(selectedFiles)
+                .filter(file => {
+                  const isImage = file.type.startsWith('image/');
+                  if (!isImage) {
+                    addLog(`Пропущен не-изображение файл: ${file.name}`, 'info');
+                  }
+                  return isImage;
+                })
+                .map(file => ({
+                    id: `${file.name}-${file.lastModified}`,
+                    file,
+                    url: URL.createObjectURL(file),
+                }));
+                setFiles(imageFiles);
+                setResults([]);
+                setStatus(AppStatusEnum.Idle);
+                addLog(`Готово к обработке ${imageFiles.length} изображений.`, 'system');
+            };
+
+            const processNextFile = useCallback(() => {
+                if (fileQueue.current.length === 0) {
+                    if (processedCount.current === files.length && files.length > 0) {
+                        setStatus(AppStatusEnum.Done);
+                        addLog(`Поиск завершен. Найдено ${results.length} совпадений из ${files.length}.`, 'system');
+                    }
+                    return;
+                }
+                
+                const imageFile = fileQueue.current.shift();
+                if (!imageFile) return;
+
+                const worker = workerPool.current[processedCount.current % MAX_WORKERS];
+                
+                const img = new Image();
+                img.src = imageFile.url;
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) {
+                        addLog(`Критическая ошибка: не удалось получить 2D контекст для ${imageFile.file.name}`, 'error');
+                        processedCount.current++;
+                        setProgress({ processed: processedCount.current, total: files.length });
+                        processNextFile();
+                        return;
+                    }
+                    ctx.drawImage(img, 0, 0);
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    
+                    const targetStartColor = hexToRgb(colorStart);
+                    const targetEndColor = hexToRgb(colorEnd);
+
+                    if(!targetStartColor || !targetEndColor) {
+                        addLog('Ошибка: неверный HEX-код цвета.', 'error');
+                        // We still need to process the next file even if this one fails
+                        processedCount.current++;
+                        setProgress({ processed: processedCount.current, total: files.length });
+                        processNextFile();
+                        return;
+                    }
+                    
+                    const searchParams = { 
+                        startColor: targetStartColor, 
+                        endColor: targetEndColor, 
+                        pixelThreshold 
+                    };
+                    const message = { imageData, searchParams, imageFile };
+                    
+                    worker.postMessage(message);
+                };
+                img.onerror = () => {
+                    addLog(`Ошибка загрузки изображения: ${imageFile.file.name}`, 'error');
+                    processedCount.current++;
+                    setProgress({ processed: processedCount.current, total: files.length });
+                    processNextFile();
+                }
+            }, [colorStart, colorEnd, files.length, pixelThreshold, addLog, results.length]);
+            
+            useEffect(() => {
+                const onMessage = (event) => {
+                    const { status: responseStatus, imageFile, error } = event.data;
+
+                    if (responseStatus === 'match') {
+                        setResults(prev => [...prev, imageFile]);
+                        addLog(`Найдено совпадение: ${imageFile.file.name}`, 'success');
+                    } else if (responseStatus === 'error') {
+                        addLog(`Ошибка в воркере при обработке ${imageFile.file.name}: ${error}`, 'error');
+                    }
+                    
+                    processedCount.current++;
+                    setProgress({ processed: processedCount.current, total: files.length });
+                    processNextFile();
+                };
+
+                workerPool.current.forEach(worker => {
+                  worker.onmessage = onMessage;
+                  worker.onerror = (e) => {
+                    addLog(`Критическая ошибка воркера: ${e.message}`, 'error');
+                  }
+                });
+
+                return () => {
+                  workerPool.current.forEach(worker => {
+                      worker.onmessage = null;
+                      worker.onerror = null;
+                  });
+                };
+            }, [files.length, processNextFile, addLog]);
+
+            const handleSearch = () => {
+                if (files.length === 0 || status === AppStatusEnum.Processing) return;
+                
+                addLog('--- Начало нового поиска ---', 'system');
+                addLog(`Запущена обработка ${files.length} файлов...`, 'info');
+                setStatus(AppStatusEnum.Processing);
+                setResults([]);
+                processedCount.current = 0;
+                setProgress({ processed: 0, total: files.length });
+                fileQueue.current = [...files];
+
+                for (let i = 0; i < Math.min(MAX_WORKERS, files.length); i++) {
+                    processNextFile();
+                }
+            };
+
+            const handleCopyLogs = () => {
+                const logText = logs.map(l => `[${l.timestamp}] [${l.type.toUpperCase()}] ${l.message}`).join('\\n');
+                navigator.clipboard.writeText(logText).then(() => {
+                    addLog('Журнал скопирован в буфер обмена.', 'system');
+                }).catch(err => {
+                    addLog('Не удалось скопировать журнал.', 'error');
+                });
+            };
+
+            const handleClearLogs = () => {
+                setLogs([]);
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col md:flex-row bg-gray-900 text-gray-200">
+                  <aside className="w-full md:w-auto p-4">
+                      <ControlPanel
+                      colorStart={colorStart}
+                      setColorStart={setColorStart}
+                      colorEnd={colorEnd}
+                      setColorEnd={setColorEnd}
+                      pixelThreshold={pixelThreshold}
+                      setPixelThreshold={setPixelThreshold}
+                      onFilesSelect={handleFilesSelect}
+                      onSearch={handleSearch}
+                      status={status}
+                      fileCount={files.length}
+                      />
+                  </aside>
+                  <main className="flex-1 flex flex-col overflow-hidden">
+                      <div className="p-4 border-b border-gray-800">
+                          {status === AppStatusEnum.Idle && <h1 className="text-xl">Выберите папку и параметры, чтобы начать</h1>}
+                          {status === AppStatusEnum.Processing && <h1 className="text-xl">Обработка... ({progress.processed} / {progress.total})</h1>}
+                          {status === AppStatusEnum.Done && <h1 className="text-xl">Поиск завершен. Найдено {results.length} подходящих изображений.</h1>}
+                      </div>
+                      {status === AppStatusEnum.Processing && (
+                          <div className="w-full bg-gray-700 h-1.5">
+                              <div className="bg-indigo-600 h-1.5 rounded-full" style={{ width: progress.total > 0 ? `${(progress.processed / progress.total) * 100}%` : '0%' }}></div>
+                          </div>
+                      )}
+                      <div className="flex-1 overflow-y-auto">
+                        {status === AppStatusEnum.Idle && files.length > 0 && (
+                            <div className="flex items-center justify-center h-full text-gray-500 text-center p-8">
+                            <p>Готово к поиску по {files.length} изображениям. Нажмите "Начать поиск".</p>
+                            </div>
+                        )}
+                        {(status === AppStatusEnum.Done || status === AppStatusEnum.Processing) && <ResultsGrid results={results} />}
+                        {status === AppStatusEnum.Idle && files.length === 0 && (
+                            <div className="flex items-center justify-center h-full text-gray-500 text-center p-8">
+                            <p>Добро пожаловать! Выберите папку с изображениями, чтобы начать.</p>
+                            </div>
+                        )}
+                      </div>
+                      <LogPanel logs={logs} onCopy={handleCopyLogs} onClear={handleClearLogs} />
+                  </main>
+                </div>
+            );
+        };
+
+        // --- From index.tsx ---
+        const rootElement = document.getElementById('root');
+        if (rootElement) {
+          try {
+            const root = ReactDOM.createRoot(rootElement);
+            root.render(<App />);
+          } catch(e) {
+            rootElement.innerHTML = `<div class="p-4 text-red-400"><strong>Критическая ошибка при запуске React:</strong> ${e.message}</div>`;
+            console.error(e);
+          }
+        }
+
+    </script>
+</body>
+</html>
